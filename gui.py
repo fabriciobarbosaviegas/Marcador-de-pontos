@@ -96,19 +96,29 @@ class GeocodeGUI(tk.Tk):
             self.after(0, lambda: self.log(f'Processamento finalizado. Arquivo: {result_file} | Erros: {errors}'))
             self.after(0, lambda: self.open_btn.config(state='normal'))
 
-            # Mostrar resumo de endereços com erro
+            # Preparar e exibir um alert com o resultado e lista resumida de endereços com erro
+            max_show = 100
+            alert_lines = [f'Arquivo gerado: {result_file}', f'Erros: {errors}', '']
             if failed_addresses:
-                summary = f'{len(failed_addresses)} endereços falharam. Veja detalhes.'
-                self.after(0, lambda: messagebox.showinfo('Concluído', f'Arquivo gerado: {result_file}\nErros: {errors}\n\n{summary}'))
-                # Logar lista resumida (limitada a 20)
-                max_show = 20
-                self.after(0, lambda: self.log('--- Endereços com erro (resumo) ---'))
+                alert_lines.append(f'Endereços com erro ({len(failed_addresses)}):')
                 for addr in failed_addresses[:max_show]:
-                    self.after(0, lambda a=addr: self.log(a))
+                    alert_lines.append(f'- {addr}')
                 if len(failed_addresses) > max_show:
-                    self.after(0, lambda: self.log(f'... e mais {len(failed_addresses)-max_show} endereços'))
+                    alert_lines.append(f'... e mais {len(failed_addresses)-max_show} endereços')
             else:
-                self.after(0, lambda: messagebox.showinfo('Concluído', f'Arquivo gerado: {result_file}\nErros: {errors}'))
+                alert_lines.append('Nenhum endereço com erro.')
+
+            full_alert = '\n'.join(alert_lines)
+            # também logar no painel de detalhes
+            self.after(0, lambda: self.log('--- Resumo final ---'))
+            self.after(0, lambda: self.log(f'Arquivo: {result_file}'))
+            self.after(0, lambda: self.log(f'Erros: {errors}'))
+            if failed_addresses:
+                for addr in failed_addresses[:20]:
+                    self.after(0, lambda a=addr: self.log(a))
+
+            # Mostrar alert principal com o resumo completo
+            self.after(0, lambda m=full_alert: messagebox.showinfo('Concluído', m))
         except Exception as e:
             self.log(f'Erro durante processamento: {e}')
             messagebox.showerror('Erro', f'Erro durante processamento:\n{e}')
@@ -144,6 +154,37 @@ class GeocodeGUI(tk.Tk):
             self.details_frame.pack(padx=0, pady=0, fill='both', expand=True)
             self.toggle_btn.config(text='Ocultar detalhes')
             self.details_shown = True
+
+    def show_alert_with_scroll(self, title: str, content: str, char_limit: int = 1500, line_limit: int = 30):
+        """Exibe um alert; se o conteúdo for grande, abre uma janela com ScrolledText e scrollbar.
+
+        - Usa messagebox.showinfo quando o conteúdo for pequeno.
+        - Caso contrário cria um Toplevel com um ScrolledText e botão OK.
+        """
+        # Decidir se usamos scroll ou messagebox
+        lines = content.count('\n') + 1
+        if len(content) <= char_limit and lines <= line_limit:
+            messagebox.showinfo(title, content)
+            return
+
+        # Janela personalizada com scroll
+        win = tk.Toplevel(self)
+        win.title(title)
+        win.transient(self)
+        win.grab_set()
+
+        # Ajustar dimensão razoável
+        win.geometry('720x480')
+
+        txt = scrolledtext.ScrolledText(win, wrap='word')
+        txt.pack(fill='both', expand=True, padx=8, pady=8)
+        txt.insert('1.0', content)
+        txt.configure(state='disabled')
+
+        btn = tk.Button(win, text='OK', width=12, command=win.destroy)
+        btn.pack(pady=(0,8))
+        # centralizar focus
+        win.focus_force()
 
 
 def main():
