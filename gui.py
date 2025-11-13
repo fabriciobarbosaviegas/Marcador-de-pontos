@@ -1,6 +1,6 @@
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext
+from tkinter import filedialog, messagebox, scrolledtext, ttk
 import os
 import sys
 
@@ -37,8 +37,22 @@ class GeocodeGUI(tk.Tk):
         self.open_btn = tk.Button(btn_frame, text='Abrir CSV', command=self.open_output, state='disabled')
         self.open_btn.pack(side='left', padx=6)
 
-        self.progress = scrolledtext.ScrolledText(self, height=12)
+        self.toggle_btn = tk.Button(btn_frame, text='Mostrar detalhes', command=self.toggle_details)
+        self.toggle_btn.pack(side='left', padx=6)
+
+        # Barra de progresso indeterminada/animada
+        self.progress_bar = ttk.Progressbar(btn_frame, mode='indeterminate', length=150)
+        self.progress_bar.pack(side='right')
+
+        self.loading_label = tk.Label(btn_frame, text='')
+        self.loading_label.pack(side='right', padx=(6,0))
+
+        # Frame de detalhes (inicialmente escondido)
+        self.details_frame = tk.Frame(self)
+        self.progress = scrolledtext.ScrolledText(self.details_frame, height=12)
         self.progress.pack(padx=12, pady=12, fill='both', expand=True)
+
+        self.details_shown = False
 
     def select_file(self):
         path = filedialog.askopenfilename(title='Selecione o arquivo .ods', filetypes=[('ODS files', '*.ods'), ('All files', '*.*')])
@@ -46,6 +60,7 @@ class GeocodeGUI(tk.Tk):
             self.file_path_var.set(path)
 
     def log(self, msg: str):
+        # Insere em UI thread
         self.progress.insert('end', msg + '\n')
         self.progress.see('end')
 
@@ -62,20 +77,47 @@ class GeocodeGUI(tk.Tk):
         self.progress.delete('1.0', 'end')
         self.log(f'Iniciando processamento: {file_path}')
 
+        # Mostrar animação de carregamento
+        self.loading = True
+        self.progress_bar.start(50)
+        self.loading_label.config(text='Processando...')
+
         thread = threading.Thread(target=self._run_process, args=(file_path, output), daemon=True)
         thread.start()
 
     def _run_process(self, file_path, output):
         try:
-            result_file, errors = process_file(file_path, output)
-            self.log(f'Processamento finalizado. Arquivo: {result_file} | Erros: {errors}')
-            self.open_btn.config(state='normal')
-            messagebox.showinfo('Concluído', f'Arquivo gerado: {result_file}\nErros: {errors}')
+            # Passa um logger que posta mensagens na UI thread
+            def logger(msg: str):
+                self.after(0, lambda: self.log(msg))
+
+            result_file, errors, failed_addresses = process_file(file_path, output, logger=logger)
+
+            self.after(0, lambda: self.log(f'Processamento finalizado. Arquivo: {result_file} | Erros: {errors}'))
+            self.after(0, lambda: self.open_btn.config(state='normal'))
+
+            # Mostrar resumo de endereços com erro
+            if failed_addresses:
+                summary = f'{len(failed_addresses)} endereços falharam. Veja detalhes.'
+                self.after(0, lambda: messagebox.showinfo('Concluído', f'Arquivo gerado: {result_file}\nErros: {errors}\n\n{summary}'))
+                # Logar lista resumida (limitada a 20)
+                max_show = 20
+                self.after(0, lambda: self.log('--- Endereços com erro (resumo) ---'))
+                for addr in failed_addresses[:max_show]:
+                    self.after(0, lambda a=addr: self.log(a))
+                if len(failed_addresses) > max_show:
+                    self.after(0, lambda: self.log(f'... e mais {len(failed_addresses)-max_show} endereços'))
+            else:
+                self.after(0, lambda: messagebox.showinfo('Concluído', f'Arquivo gerado: {result_file}\nErros: {errors}'))
         except Exception as e:
             self.log(f'Erro durante processamento: {e}')
             messagebox.showerror('Erro', f'Erro durante processamento:\n{e}')
         finally:
-            self.start_btn.config(state='normal')
+            # Parar animação
+            self.loading = False
+            self.progress_bar.stop()
+            self.after(0, lambda: self.loading_label.config(text=''))
+            self.after(0, lambda: self.start_btn.config(state='normal'))
 
     def open_output(self):
         out = self.output_var.get()
@@ -90,6 +132,18 @@ class GeocodeGUI(tk.Tk):
                 messagebox.showerror('Erro', f'Não foi possível abrir o arquivo: {e}')
         else:
             messagebox.showwarning('Aviso', 'Arquivo de saída não encontrado.')
+
+    def toggle_details(self):
+        if self.details_shown:
+            # Esconder
+            self.details_frame.pack_forget()
+            self.toggle_btn.config(text='Mostrar detalhes')
+            self.details_shown = False
+        else:
+            # Mostrar
+            self.details_frame.pack(padx=0, pady=0, fill='both', expand=True)
+            self.toggle_btn.config(text='Ocultar detalhes')
+            self.details_shown = True
 
 
 def main():

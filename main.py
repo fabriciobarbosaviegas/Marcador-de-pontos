@@ -3,7 +3,7 @@ from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 import pandas as pd
 import csv
 import time
-from typing import List, Tuple
+from typing import List, Tuple, Callable
 
 # Cria um geolocalizador reutilizável para evitar re-criação em cada chamada
 geolocator = Nominatim(user_agent="my_geocoding_app")
@@ -60,13 +60,15 @@ def process_ods_file(file_path: str, city_suffix: str = 'Pelotas - RS') -> List[
     return column_data
 
 
-def process_file(file_path: str, output_filename: str = 'enderecos_com_coordenadas.csv') -> Tuple[str, int]:
+def process_file(file_path: str, output_filename: str = 'enderecos_com_coordenadas.csv', logger: Callable[[str], None] = None) -> Tuple[str, int, List[str]]:
     """Processa o arquivo ODS e gera um CSV com coordenadas.
 
-    Retorna (output_filename, erros_count).
+    Se fornecido, `logger` é uma função callable que recebe uma string para logar
+    mensagens em tempo real (por exemplo pela GUI). Retorna (output_filename, erros_count, failed_addresses).
     """
     column_data = process_ods_file(file_path)
     erros = 0
+    failed_addresses: List[str] = []
 
     with open(output_filename, 'w', newline='', encoding='utf-8') as csvfile:
         fieldnames = ['WKT', 'Endereço']
@@ -77,15 +79,30 @@ def process_file(file_path: str, output_filename: str = 'enderecos_com_coordenad
             lat, lon = get_coordinates_from_address(address)
             if lat is not None and lon is not None:
                 writer.writerow({'WKT': f'({lon} {lat})', 'Endereço': address})
-                print(f"Coordenadas para '{address}': Latitude={lat}, Longitude={lon}")
+                msg = f"Coordenadas para '{address}': Latitude={lat}, Longitude={lon}"
+                if logger:
+                    logger(msg)
+                else:
+                    print(msg)
             else:
                 writer.writerow({'WKT': f'(None None)', 'Endereço': address})
-                print(f"Não foi possível obter coordenadas para '{address}'.")
+                msg = f"Não foi possível obter coordenadas para '{address}'."
+                if logger:
+                    logger(msg)
+                else:
+                    print(msg)
                 erros += 1
+                failed_addresses.append(address)
 
-    print(f"Arquivo CSV com coordenadas gerado: {output_filename}")
-    print(f"Erros Totais: {erros}")
-    return output_filename, erros
+    summary_msg = f"Arquivo CSV com coordenadas gerado: {output_filename}"
+    if logger:
+        logger(summary_msg)
+        logger(f"Erros Totais: {erros}")
+    else:
+        print(summary_msg)
+        print(f"Erros Totais: {erros}")
+
+    return output_filename, erros, failed_addresses
 
 
 if __name__ == '__main__':
