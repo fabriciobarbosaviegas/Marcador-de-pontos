@@ -1,16 +1,16 @@
 # 🗺️ Marcador de Pontos — Geocodificação Automática para Google My Maps
 
-* [📥 Entrada](#-entrada)
-* [📤 Saída](#-saída)
-* [🛠️ Instalação](#️-instalação)
-* [▶️ Como Executar](#️-como-executar)
-* [📄 Estrutura do Projeto](#-estrutura-do-projeto)
-* [⚙️ Funcionamento Interno](#️-funcionamento-interno)
-
-  * [main.py](#mainpy)
-  * [utils.py](#utilspy)
-* [📍 Importando no Google My Maps](#-importando-no-google-my-maps)
-* [⚠️ Limitações](#️-limitações)
+## Indice
+- [📥 Entrada](#-entrada)
+- [📤 Saída](#-saída)
+- [🛠️ Instalação](#️-instalação)
+- [▶️ Como Executar](#️-como-executar)
+- [📄 Estrutura do Projeto](#-estrutura-do-projeto)
+- [⚙️ Funcionamento Interno](#️-funcionamento-interno)
+  - [main.py](#mainpy)
+  - [utils.py](#utilspy)
+- [📍 Importando no Google My Maps](#-importando-no-google-my-maps)
+- [⚠️ Limitações](#️-limitações)
 
 Este projeto permite **converter endereços de uma planilha ODS em coordenadas geográficas**, gerando um arquivo CSV importável no **Google My Maps**.
 
