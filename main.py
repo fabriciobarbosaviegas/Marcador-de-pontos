@@ -1,111 +1,220 @@
-from geopy.geocoders import Nominatim
-from geopy.exc import GeocoderTimedOut, GeocoderServiceError
-import pandas as pd
-import csv
-import time
-from typing import List, Tuple, Callable
+import threading
+import tkinter as tk
+from tkinter import filedialog, messagebox, scrolledtext, ttk
+import os
+import sys
 
-# Cria um geolocalizador reutilizável para evitar re-criação em cada chamada
-geolocator = Nominatim(user_agent="my_geocoding_app")
+from utils import process_file
 
 
-def get_coordinates_from_address(address: str, timeout: int = 5, max_retries: int = 3) -> Tuple[float, float]:
-    """Tenta obter coordenadas para um endereço com alguns retries em caso de timeout.
+class GeocodeGUI(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title('Marcador de Pontos - GUI')
+        self.geometry('640x360')
 
-    Retorna (latitude, longitude) ou (None, None) se não encontrar.
-    """
-    attempt = 0
-    while attempt < max_retries:
+        self.file_path_var = tk.StringVar()
+        self.output_var = tk.StringVar(value='enderecos_com_coordenadas.csv')
+
+        self.create_widgets()
+
+    def create_widgets(self):
+        frame = tk.Frame(self)
+        frame.pack(padx=12, pady=12, fill='x')
+
+        tk.Label(frame, text='Arquivo ODS:').grid(row=0, column=0, sticky='w')
+        tk.Entry(frame, textvariable=self.file_path_var, width=60).grid(row=0, column=1, padx=6)
+        tk.Button(frame, text='Selecionar', command=self.select_file).grid(row=0, column=2)
+
+        tk.Label(frame, text='Arquivo de saída:').grid(row=1, column=0, sticky='w', pady=(8,0))
+        tk.Entry(frame, textvariable=self.output_var, width=60).grid(row=1, column=1, padx=6, pady=(8,0))
+
+        btn_frame = tk.Frame(self)
+        btn_frame.pack(padx=12, pady=(6,0), fill='x')
+        self.start_btn = tk.Button(btn_frame, text='Iniciar', command=self.start_processing)
+        self.start_btn.pack(side='left')
+
+        self.open_btn = tk.Button(btn_frame, text='Abrir CSV', command=self.open_output, state='disabled')
+        self.open_btn.pack(side='left', padx=6)
+
+        self.toggle_btn = tk.Button(btn_frame, text='Mostrar detalhes', command=self.toggle_details)
+        self.toggle_btn.pack(side='left', padx=6)
+
+        # Barra de progresso indeterminada/animada (criada mas NÃO empacotada)
+        self.progress_bar = ttk.Progressbar(btn_frame, mode='indeterminate', length=150)
+
+        self.loading_label = tk.Label(btn_frame, text='')
+
+        # Frame de detalhes (inicialmente escondido)
+        self.details_frame = tk.Frame(self)
+        self.progress = scrolledtext.ScrolledText(self.details_frame, height=12)
+        self.progress.pack(padx=12, pady=12, fill='both', expand=True)
+
+        self.details_shown = False
+
+    def select_file(self):
+        path = filedialog.askopenfilename(title='Selecione o arquivo .ods', filetypes=[('ODS files', '*.ods'), ('All files', '*.*')])
+        if path:
+            self.file_path_var.set(path)
+
+    def log(self, msg: str):
+        # Insere em UI thread
+        self.progress.insert('end', msg + '\n')
+        self.progress.see('end')
+
+    def start_processing(self):
+        file_path = self.file_path_var.get()
+        output = self.output_var.get()
+        if not file_path:
+            messagebox.showwarning('Aviso', 'Selecione um arquivo ODS antes de iniciar.')
+            return
+
+        # Desabilita botões enquanto processa
+        self.start_btn.config(state='disabled')
+        self.open_btn.config(state='disabled')
+        self.progress.delete('1.0', 'end')
+        self.log(f'Iniciando processamento: {file_path}')
+
+        # Mostrar animação de carregamento: empacotar widgets agora
+        self.loading = True
         try:
-            location = geolocator.geocode(address, timeout=timeout)
-            if location:
-                return location.latitude, location.longitude
+            if not getattr(self.progress_bar, '_is_packed', False):
+                self.progress_bar.pack(side='right')
+                self.progress_bar._is_packed = True
+            if not getattr(self.loading_label, '_is_packed', False):
+                self.loading_label.pack(side='right', padx=(6,0))
+                self.loading_label._is_packed = True
+        except Exception:
+            self.progress_bar.pack(side='right')
+            self.loading_label.pack(side='right', padx=(6,0))
+
+        self.progress_bar.start(50)
+        self.loading_label.config(text='Processando...')
+
+        thread = threading.Thread(target=self._run_process, args=(file_path, output), daemon=True)
+        thread.start()
+
+    def _run_process(self, file_path, output):
+        try:
+            # Passa um logger que posta mensagens na UI thread
+            def logger(msg: str):
+                self.after(0, lambda: self.log(msg))
+
+            result_file, errors, failed_addresses = process_file(file_path, output, logger=logger)
+
+            self.after(0, lambda: self.log(f'Processamento finalizado. Arquivo: {result_file} | Erros: {errors}'))
+            self.after(0, lambda: self.open_btn.config(state='normal'))
+
+            # Preparar e exibir um alert com o resultado e lista resumida de endereços com erro
+            max_show = 100
+            alert_lines = [f'Arquivo gerado: {result_file}', f'Erros: {errors}', '']
+            if failed_addresses:
+                alert_lines.append(f'Endereços com erro ({len(failed_addresses)}):')
+                for addr in failed_addresses[:max_show]:
+                    alert_lines.append(f'- {addr}')
+                if len(failed_addresses) > max_show:
+                    alert_lines.append(f'... e mais {len(failed_addresses)-max_show} endereços')
             else:
-                # Não encontrou o endereço
-                return None, None
-        except GeocoderTimedOut:
-            attempt += 1
-            wait = 1 * attempt
-            time.sleep(wait)
-        except GeocoderServiceError:
-            # Erro do serviço — não adianta continuar
-            return None, None
+                alert_lines.append('Nenhum endereço com erro.')
 
-    return None, None
+            full_alert = '\n'.join(alert_lines)
+            # também logar no painel de detalhes
+            self.after(0, lambda: self.log('--- Resumo final ---'))
+            self.after(0, lambda: self.log(f'Arquivo: {result_file}'))
+            self.after(0, lambda: self.log(f'Erros: {errors}'))
+            if failed_addresses:
+                for addr in failed_addresses[:20]:
+                    self.after(0, lambda a=addr: self.log(a))
 
+            # Mostrar alert principal com o resumo completo
+            self.after(0, lambda m=full_alert: messagebox.showinfo('Concluído', m))
+        except Exception as e:
+            self.log(f'Erro durante processamento: {e}')
+            messagebox.showerror('Erro', f'Erro durante processamento:\n{e}')
+        finally:
+            # Parar animação e esconder barra de progresso (tudo na UI thread)
+            self.loading = False
+            def stop_and_hide():
+                try:
+                    self.progress_bar.stop()
+                except Exception:
+                    pass
+                try:
+                    if getattr(self.progress_bar, '_is_packed', False):
+                        self.progress_bar.pack_forget()
+                        self.progress_bar._is_packed = False
+                    if getattr(self.loading_label, '_is_packed', False):
+                        self.loading_label.pack_forget()
+                        self.loading_label._is_packed = False
+                except Exception:
+                    pass
+                self.loading_label.config(text='')
+                self.start_btn.config(state='normal')
 
-def process_ods_file(file_path: str, city_suffix: str = 'Pelotas - RS') -> List[str]:
-    """Lê todas as abas de um arquivo .ods e coleta os valores da coluna 'Endereço'.
+            self.after(0, stop_and_hide)
 
-    Adiciona o sufixo de cidade quando o endereço for texto e não contiver o nome da cidade.
-    """
-    column_data: List[str] = []
-    xls = pd.ExcelFile(file_path, engine='odf')
-    sheet_names = xls.sheet_names
-
-    for sheet_name in sheet_names:
-        df = pd.read_excel(xls, sheet_name=sheet_name)
-
-        if 'Endereço' in df.columns:
-            for address in df['Endereço']:
-                if isinstance(address, str):
-                    if city_suffix.split()[0] not in address:
-                        address = f"{address}, {city_suffix}"
-                    column_data.append(address)
+    def open_output(self):
+        out = self.output_var.get()
+        if os.path.exists(out):
+            try:
+                if sys.platform.startswith('win'):
+                    os.startfile(os.path.abspath(out))
                 else:
-                    print(f"Endereço inválido na aba '{sheet_name}': {address}")
+                    # Fallback para outros sistemas
+                    os.system(f'xdg-open "{out}"')
+            except Exception as e:
+                messagebox.showerror('Erro', f'Não foi possível abrir o arquivo: {e}')
         else:
-            print(f"Coluna 'Endereço' não encontrada na aba '{sheet_name}'.")
+            messagebox.showwarning('Aviso', 'Arquivo de saída não encontrado.')
 
-    return column_data
+    def toggle_details(self):
+        if self.details_shown:
+            # Esconder
+            self.details_frame.pack_forget()
+            self.toggle_btn.config(text='Mostrar detalhes')
+            self.details_shown = False
+        else:
+            # Mostrar
+            self.details_frame.pack(padx=0, pady=0, fill='both', expand=True)
+            self.toggle_btn.config(text='Ocultar detalhes')
+            self.details_shown = True
+
+    def show_alert_with_scroll(self, title: str, content: str, char_limit: int = 1500, line_limit: int = 30):
+        """Exibe um alert; se o conteúdo for grande, abre uma janela com ScrolledText e scrollbar.
+
+        - Usa messagebox.showinfo quando o conteúdo for pequeno.
+        - Caso contrário cria um Toplevel com um ScrolledText e botão OK.
+        """
+        # Decidir se usamos scroll ou messagebox
+        lines = content.count('\n') + 1
+        if len(content) <= char_limit and lines <= line_limit:
+            messagebox.showinfo(title, content)
+            return
+
+        # Janela personalizada com scroll
+        win = tk.Toplevel(self)
+        win.title(title)
+        win.transient(self)
+        win.grab_set()
+
+        # Ajustar dimensão razoável
+        win.geometry('720x480')
+
+        txt = scrolledtext.ScrolledText(win, wrap='word')
+        txt.pack(fill='both', expand=True, padx=8, pady=8)
+        txt.insert('1.0', content)
+        txt.configure(state='disabled')
+
+        btn = tk.Button(win, text='OK', width=12, command=win.destroy)
+        btn.pack(pady=(0,8))
+        # centralizar focus
+        win.focus_force()
 
 
-def process_file(file_path: str, output_filename: str = 'enderecos_com_coordenadas.csv', logger: Callable[[str], None] = None) -> Tuple[str, int, List[str]]:
-    """Processa o arquivo ODS e gera um CSV com coordenadas.
-
-    Se fornecido, `logger` é uma função callable que recebe uma string para logar
-    mensagens em tempo real (por exemplo pela GUI). Retorna (output_filename, erros_count, failed_addresses).
-    """
-    column_data = process_ods_file(file_path)
-    erros = 0
-    failed_addresses: List[str] = []
-
-    with open(output_filename, 'w', newline='', encoding='utf-8') as csvfile:
-        fieldnames = ['WKT', 'Endereço']
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        writer.writeheader()
-
-        for address in column_data:
-            lat, lon = get_coordinates_from_address(address)
-            if lat is not None and lon is not None:
-                writer.writerow({'WKT': f'({lon} {lat})', 'Endereço': address})
-                msg = f"Coordenadas para '{address}': Latitude={lat}, Longitude={lon}"
-                if logger:
-                    logger(msg)
-                else:
-                    print(msg)
-            else:
-                writer.writerow({'WKT': f'(None None)', 'Endereço': address})
-                msg = f"Não foi possível obter coordenadas para '{address}'."
-                if logger:
-                    logger(msg)
-                else:
-                    print(msg)
-                erros += 1
-                failed_addresses.append(address)
-
-    summary_msg = f"Arquivo CSV com coordenadas gerado: {output_filename}"
-    if logger:
-        logger(summary_msg)
-        logger(f"Erros Totais: {erros}")
-    else:
-        print(summary_msg)
-        print(f"Erros Totais: {erros}")
-
-    return output_filename, erros, failed_addresses
+def main():
+    app = GeocodeGUI()
+    app.mainloop()
 
 
 if __name__ == '__main__':
-    # Execução padrão via CLI
-    file_path = 'sample/Cópia de Atividade 1 PET.ods'
-    process_file(file_path)
+    main()

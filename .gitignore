@@ -160,3 +160,4 @@ cython_debug/
 #.idea/
 *.csv
 *.ods
+.~lock.enderecos_com_coordenadas.csv\#
