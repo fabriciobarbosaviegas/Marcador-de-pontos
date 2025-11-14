@@ -140,8 +140,3 @@ A interface gráfica será aberta.
 * Endereços incompletos podem retornar `None`
 * Pode ser necessário limpar caracteres especiais ou abreviações confusas
 
-
-
-Aqui está o **README revisado com uma Table of Contents** totalmente funcional e clicável (links automáticos do GitHub):
-
----
